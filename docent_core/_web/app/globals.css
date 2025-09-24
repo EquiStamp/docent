@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --radius: 0.5rem;
+
+    /* General semantic colors */
+    --blue: 213.8 100% 96.9%;
+    --blue-border: 217.2 91.2% 59.8%;
+    --blue-text: 217.2 91.2% 59.8%;
+    --blue-muted: 213.3 96.9% 87.3%;
+
+    --orange: 32 100% 97%;
+    --orange-border: 24.6 95% 53.1%;
+    --orange-text: 24.6 95% 53.1%;
+
+    --green: 138.5 76.5% 96.7%;
+    --green-border: 142.1 70.6% 45.3%;
+    --green-text: 142.1 70.6% 45.3%;
+    --green-muted: 152.4 76% 80.4%;
+
+    --yellow: 60 100% 97%;
+    --yellow-border: 60 100% 85%;
+    --yellow-text: 60 100% 50%;
+    --yellow-muted: 52.8 98.3% 76.9%;
+
+    --red: 0 100% 97%;
+    --red-border: 0 100% 85%;
+    --red-text: 0 100% 50%;
+    --red-muted: 0 96.3% 89.4%;
+
+    --indigo: 240 100% 97%;
+    --indigo-border: 240 100% 85%;
+    --indigo-text: 240 100% 50%;
+    --indigo-muted: 228 96.5% 88.8%;
+
+    --purple: 270 100% 97%;
+    --purple-border: 270.7 91% 65.1%;
+    --purple-text: 270.7 91% 65.1%;
+
+    --cyan-border: 188.7 94.5% 42.7%;
+    --cyan-text: 188.7 94.5% 42.7%;
+  }
+
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 20.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+
+    /* General semantic colors - dark mode */
+    --blue: 226.2 57% 21%;
+    --blue-border: 217.2 91.2% 59.8%;
+    --blue-text: 217.2 91.2% 59.8%;
+    --blue-muted: 225.9 70.7% 40.2%;
+
+    /* --orange: 32 100% 15%;
+    --orange-border: 32 100% 30%;
+    --orange-text: 32 100% 60%; */
+    --orange: 13 81.1% 14.5%;
+    --orange-border: 24.6 95% 53.1%;
+    --orange-text: 24.6 95% 53.1%;
+
+    --green: 144.9 80.4% 10%;
+    --green-border: 142.1 70.6% 45.3%;
+    --green-text: 142.1 70.6% 45.3%;
+    --green-muted: 142.8 64.2% 24.1%;
+
+    --yellow: 60 100% 15%;
+    --yellow-border: 60 100% 30%;
+    --yellow-text: 60 100% 60%;
+    --yellow-muted: 31.8 81% 28.8%;
+
+    --red: 0 100% 15%;
+    --red-border: 0 100% 30%;
+    --red-text: 0 100% 60%;
+    --red-muted: 0 70% 35.3%;
+
+    /* --indigo: 214 100% 15%; */
+    --indigo: 243.8 47.1% 20%;
+    --indigo-border: 238.7 83.5% 66.7%;
+    --indigo-text: 238.7 83.5% 66.7%;
+    --indigo-muted: 243.7 54.5% 41.4%;
+
+    --purple: 270 100% 15%;
+    --purple-border: 270.7 91% 65.1%;
+    --purple-text: 270.7 91% 65.1%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-open-sans);
+
+    /* Horizontal scrollbar causes a tiny bit of vertical overflow, but don't show a vertical scrollbar */
+    overflow-y: hidden;
+  }
+}
+
+/* Custom scrollbar styles */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+  -ms-overflow-style: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(155, 155, 155, 0.5);
+  border-radius: 20px;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-hide {
+  /* For Firefox */
+  scrollbar-width: none;
+  /* For Internet Explorer and Edge */
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  /* For Chrome, Safari, and Opera */
+  display: none;
+}

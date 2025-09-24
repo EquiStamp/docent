@@ -1,0 +1,72 @@
+exclude: "^external/"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-added-large-files
+        exclude: "website/public/.*|package-lock.json|bun.lockb|poetry\\.lock|uv.lock"
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-yaml
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+      - id: requirements-txt-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: jupyter-clear-output
+        name: jupyter-clear-output
+        files: \.ipynb$
+        stages: [pre-commit]
+        language: system
+        entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pycqa/isort
+    rev: 6.0.1
+    hooks:
+      - id: isort
+        name: isort (python)
+        args: ["--settings-path", "."]
+
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        args:
+          - --remove-all-unused-imports
+          - --remove-unused-variables
+          - --in-place
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.396
+    hooks:
+      - id: pyright
+        files: ^(docent/|docent_core/).*\.py$
+        args: ["--pythonpath", ".venv/bin/python"]
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        name: prettier
+        args: [--semi=true, --single-quote=true, --tab-width=2, --trailing-comma=es5]
+        files: ^docent_core/_web/.*\.(ts|tsx|js|jsx)$
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd docent_core/_web && bun run lint-fix'
+        language: system
+        files: ^docent_core/_web/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
