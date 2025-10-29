@@ -16,9 +16,7 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 COPY --from=frontend-deps /app/node_modules ./node_modules
 COPY docent_core/_web ./
-# Build frontend - API requests are proxied via Next.js rewrites to localhost:8888
-# NEXT_PUBLIC_API_HOST is required during build but not actually used at runtime
-# since all /rest/* requests are rewritten to the internal backend
+
 ENV NEXT_PUBLIC_API_HOST=https://docent.fly.dev
 ENV NEXT_PUBLIC_INTERNAL_API_HOST=http://localhost:8888
 RUN npm run build
