@@ -1,0 +1,290 @@
+# Multi-stage Dockerfile for Fly.io deployment
+# This Dockerfile builds and runs all Docent services in a single container:
+# - PostgreSQL with pgvector
+# - Redis
+# - Backend API server
+# - Background worker
+# - Frontend Next.js app
+
+FROM node:22-alpine AS frontend-deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+COPY docent_core/_web/package*.json ./
+RUN npm ci --legacy-peer-deps
+
+FROM node:22-alpine AS frontend-builder
+WORKDIR /app
+COPY --from=frontend-deps /app/node_modules ./node_modules
+COPY docent_core/_web ./
+# Build frontend - API requests are proxied via Next.js rewrites to localhost:8888
+# NEXT_PUBLIC_API_HOST is required during build but not actually used at runtime
+# since all /rest/* requests are rewritten to the internal backend
+ENV NEXT_PUBLIC_API_HOST=https://docent.fly.dev
+ENV NEXT_PUBLIC_INTERNAL_API_HOST=http://localhost:8888
+RUN npm run build
+
+# Main runtime image
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Basic tools
+    curl \
+    gnupg \
+    lsb-release \
+    ca-certificates \
+    # Process management
+    supervisor \
+    # Nginx for basic auth (password protection)
+    nginx \
+    apache2-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add PostgreSQL repository and install PostgreSQL with pgvector
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y \
+        postgresql-15 \
+        postgresql-contrib-15 \
+        postgresql-15-pgvector \
+        redis-server \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for Python package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+#################################
+# Install Python dependencies   #
+#################################
+
+# Copy Python package files
+COPY docent docent
+COPY pyproject.toml .
+COPY uv.lock .
+
+# Convert uv.lock to requirements.txt and install
+RUN uv export --format requirements-txt > requirements.txt
+RUN uv pip install --system -r requirements.txt
+
+# Install the core application
+COPY docent_core docent_core
+RUN uv pip install --system -e .
+
+# Copy Alembic migrations
+COPY alembic alembic
+COPY alembic.ini alembic.ini
+
+#################################
+# Setup Frontend                #
+#################################
+
+# Create frontend directory
+RUN mkdir -p /app/frontend
+
+# Copy built frontend from builder stage
+COPY --from=frontend-builder /app/public /app/frontend/public
+COPY --from=frontend-builder /app/.next/standalone /app/frontend/
+COPY --from=frontend-builder /app/.next/static /app/frontend/.next/static
+
+#################################
+# Configuration & Scripts       #
+#################################
+
+# Create necessary directories
+RUN mkdir -p /app/scripts /var/log/supervisor /var/run/postgresql /var/lib/postgresql/data /etc/nginx/conf.d
+
+# Create nginx configuration for basic auth
+COPY <<'EOF' /etc/nginx/sites-available/default
+server {
+    listen 3000;
+    server_name _;
+    
+    # Health check endpoint - returns 200 OK without auth
+    location = /health {
+        auth_basic off;
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+    
+    # All routes require authentication
+    location / {
+        auth_basic "Docent Access";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOF
+
+# Create startup scripts
+COPY <<'EOF' /app/scripts/start-all.sh
+#!/bin/bash
+set -e
+
+echo "Starting all Docent services..."
+
+# Setup basic auth if credentials are provided
+if [ -n "$AUTH_USERNAME" ] && [ -n "$AUTH_PASSWORD" ]; then
+    echo "Setting up basic authentication..."
+    echo "$AUTH_PASSWORD" | htpasswd -ci /etc/nginx/.htpasswd "$AUTH_USERNAME"
+    echo "Basic auth enabled for user: $AUTH_USERNAME"
+else
+    echo "WARNING: No AUTH_USERNAME/AUTH_PASSWORD set - nginx will be disabled!"
+    echo "To enable password protection, set: flyctl secrets set AUTH_USERNAME=admin AUTH_PASSWORD=yourpassword"
+fi
+
+# Use a subdirectory for PostgreSQL data (volume mount point may have lost+found)
+PGDATA="/var/lib/postgresql/data/pgdata"
+
+# Ensure proper ownership of the volume mount
+echo "Setting up PostgreSQL directory permissions..."
+chown -R postgres:postgres /var/lib/postgresql/data
+
+# Initialize PostgreSQL if needed
+if [ ! -f "$PGDATA/PG_VERSION" ]; then
+    echo "Initializing PostgreSQL database..."
+    mkdir -p "$PGDATA"
+    chown -R postgres:postgres "$PGDATA"
+    chmod 700 "$PGDATA"
+    su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D $PGDATA"
+    
+    # Configure PostgreSQL to listen on localhost
+    echo "host all all 127.0.0.1/32 md5" >> "$PGDATA/pg_hba.conf"
+    echo "host all all ::1/128 md5" >> "$PGDATA/pg_hba.conf"
+    echo "local all all md5" >> "$PGDATA/pg_hba.conf"
+else
+    echo "PostgreSQL data directory already exists, ensuring permissions..."
+    chown -R postgres:postgres "$PGDATA"
+    chmod 700 "$PGDATA"
+fi
+
+# Start PostgreSQL
+echo "Starting PostgreSQL..."
+mkdir -p /var/lib/postgresql/logs
+chown postgres:postgres /var/lib/postgresql/logs
+su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D $PGDATA -l /var/lib/postgresql/logs/postgresql.log start"
+
+# Wait for PostgreSQL to be ready
+echo "Waiting for PostgreSQL to be ready..."
+for i in {1..30}; do
+    if su - postgres -c "psql -U postgres -c 'SELECT 1' > /dev/null 2>&1"; then
+        echo "PostgreSQL is ready!"
+        break
+    fi
+    echo "Waiting for PostgreSQL... ($i/30)"
+    sleep 2
+done
+
+# Create database and user if they don't exist
+echo "Setting up database..."
+su - postgres -c "psql -U postgres -tc \"SELECT 1 FROM pg_user WHERE usename = '${DOCENT_PG_USER}'\" | grep -q 1 || psql -U postgres -c \"CREATE USER ${DOCENT_PG_USER} WITH PASSWORD '${DOCENT_PG_PASSWORD}';\""
+su - postgres -c "psql -U postgres -tc \"SELECT 1 FROM pg_database WHERE datname = '${DOCENT_PG_DATABASE}'\" | grep -q 1 || psql -U postgres -c \"CREATE DATABASE ${DOCENT_PG_DATABASE} OWNER ${DOCENT_PG_USER};\""
+su - postgres -c "psql -U postgres -d ${DOCENT_PG_DATABASE} -c \"CREATE EXTENSION IF NOT EXISTS vector;\""
+
+# Start Redis
+echo "Starting Redis..."
+redis-server --daemonize yes --bind 127.0.0.1 --port 6379
+
+# Wait for Redis to be ready
+echo "Waiting for Redis to be ready..."
+for i in {1..10}; do
+    if redis-cli ping > /dev/null 2>&1; then
+        echo "Redis is ready!"
+        break
+    fi
+    echo "Waiting for Redis... ($i/10)"
+    sleep 1
+done
+
+# Run database migrations
+echo "Running database migrations..."
+cd /app
+alembic upgrade head
+
+# Start Backend API server
+echo "Starting Backend API server..."
+docent_core server --host 0.0.0.0 --port 8888 --workers 4 &
+BACKEND_PID=$!
+
+# Start Worker
+echo "Starting Background Worker..."
+docent_core worker --workers 2 &
+WORKER_PID=$!
+
+# Start Frontend on port 3001 (nginx will proxy from 3000 -> 3001)
+echo "Starting Frontend..."
+cd /app/frontend
+PORT=3001 HOSTNAME=127.0.0.1 node server.js &
+FRONTEND_PID=$!
+
+# Start nginx if auth is configured
+if [ -f /etc/nginx/.htpasswd ]; then
+    echo "Starting nginx with basic auth..."
+    nginx -g 'daemon off;' &
+    NGINX_PID=$!
+    echo "Nginx started with password protection on port 3000"
+else
+    echo "Nginx not started - no auth configured. Frontend accessible directly on port 3001"
+    echo "WARNING: Application is NOT password protected!"
+fi
+
+echo "All services started successfully!"
+
+# Wait for any process to exit
+wait -n
+
+# Exit with status of process that exited first
+exit $?
+EOF
+
+COPY <<'EOF' /app/scripts/pre-deploy.sh
+#!/bin/bash
+set -e
+
+echo "Pre-deployment check..."
+echo "Skipping migrations - will run on startup"
+exit 0
+EOF
+
+# Make scripts executable
+RUN chmod +x /app/scripts/*.sh
+
+# Create a minimal .env file (actual values come from environment variables)
+RUN touch /app/.env
+
+# Set proper permissions
+RUN chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
+RUN chmod 700 /var/lib/postgresql/data || true
+
+# Expose ports (for documentation - Fly.io handles actual routing)
+EXPOSE 3000 8888 5432 6379
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:3000/ || exit 1
+
+# Default command
+CMD ["/app/scripts/start-all.sh"]
+

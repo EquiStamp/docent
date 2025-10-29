@@ -1,0 +1,91 @@
+# Fly.io configuration for Docent - All-in-one deployment
+# This configuration runs backend, worker, frontend, PostgreSQL, and Redis in a single Fly.io app
+
+app = "docent"
+primary_region = "ams"  # Amsterdam, Netherlands - change as needed
+
+[build]
+  dockerfile = "Dockerfile.fly"
+
+[env]
+  ENV_RESOLUTION_STRATEGY = "os_environ"
+  # Backend
+  DOCENT_SERVER_PORT = "8888"
+  # Database
+  DOCENT_PG_HOST = "localhost"
+  DOCENT_PG_PORT = "5432"
+  DOCENT_PG_USER = "docent_user"
+  DOCENT_PG_DATABASE = "docent_db"
+  # Redis
+  DOCENT_REDIS_HOST = "localhost"
+  DOCENT_REDIS_PORT = "6379"
+  # Frontend
+  NEXT_PUBLIC_INTERNAL_API_HOST = "http://localhost:8888"
+
+# Main HTTP service (serves both backend API and frontend)
+[http_service]
+  internal_port = 3000  # Frontend port
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+  # Health check - nginx responds with 200 OK without auth
+  [[http_service.checks]]
+    grace_period = "120s"  # Increased for PostgreSQL initialization
+    interval = "30s"
+    method = "GET"
+    timeout = "10s"
+    path = "/health"
+
+# VM configuration - adjust based on your needs
+[[vm]]
+  memory = "2gb"  # Increased for running multiple services
+  cpu_kind = "shared"
+  cpus = 2
+
+# Persistent volume for PostgreSQL data
+[mounts]
+  source = "docent_pgdata"
+  destination = "/var/lib/postgresql/data"
+  initial_size = "10gb"
+
+# Deployment configuration
+[deploy]
+  strategy = "rolling"
+  # Run migrations before deployment
+  release_command = "/app/scripts/pre-deploy.sh"
+
+# Process groups - all processes run in the same VM
+[processes]
+  app = "/app/scripts/start-all.sh"
+
+# Secrets to set via `flyctl secrets set`:
+# Required:
+#   flyctl secrets set DOCENT_PG_PASSWORD=<strong-password>
+#
+# Optional (for password protection - RECOMMENDED):
+#   flyctl secrets set AUTH_USERNAME=admin AUTH_PASSWORD=<strong-password>
+#   This enables basic HTTP authentication on the frontend
+#
+# Optional (for LLM providers):
+#   flyctl secrets set OPENAI_API_KEY=<your-key>
+#   flyctl secrets set ANTHROPIC_API_KEY=<your-key>
+#   flyctl secrets set GOOGLE_API_KEY=<your-key>
+#
+# Optional (for monitoring):
+#   flyctl secrets set SENTRY_DSN=<your-dsn>
+#   flyctl secrets set POSTHOG_API_KEY=<your-key>
+#
+# Optional (for CORS - if using custom domain):
+#   flyctl secrets set DOCENT_CORS_ORIGINS=https://yourdomain.com
+#
+# Optional (deployment tracking):
+#   flyctl secrets set DEPLOYMENT_ID=production
+
