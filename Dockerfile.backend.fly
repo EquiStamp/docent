@@ -8,14 +8,21 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including locales
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
     lsb-release \
     ca-certificates \
     supervisor \
+    locales \
     && rm -rf /var/lib/apt/lists/*
+
+# Generate en_US.UTF-8 locale
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 
 # Add PostgreSQL repository and install PostgreSQL with pgvector
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
@@ -72,7 +79,7 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
     mkdir -p "$PGDATA"
     chown -R postgres:postgres "$PGDATA"
     chmod 700 "$PGDATA"
-    su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D $PGDATA"
+    su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D $PGDATA --encoding=UTF8 --locale=en_US.UTF-8"
     
     # Configure PostgreSQL
     echo "host all all 127.0.0.1/32 md5" >> "$PGDATA/pg_hba.conf"
