@@ -18,6 +18,8 @@ primary_region = "ams"
   # Redis
   DOCENT_REDIS_HOST = "localhost"
   DOCENT_REDIS_PORT = "6379"
+  # LLM Cache
+  LLM_CACHE_PATH = "/app/cache/llm"
   # CORS - allow frontend domain
   DOCENT_CORS_ORIGINS = "https://docent.fly.dev"
 

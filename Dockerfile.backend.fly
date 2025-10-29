@@ -50,7 +50,7 @@ COPY alembic.ini alembic.ini
 RUN touch .env
 
 # Create necessary directories
-RUN mkdir -p /app/scripts /var/log/supervisor /var/run/postgresql /var/lib/postgresql/data
+RUN mkdir -p /app/scripts /var/log/supervisor /var/run/postgresql /var/lib/postgresql/data /app/cache/llm
 
 # Create startup script for backend services
 COPY <<'EOF' /app/scripts/start-backend.sh
