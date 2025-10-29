@@ -1,15 +1,14 @@
-# Fly.io configuration for Docent Backend
-# This configuration runs backend, worker, PostgreSQL, and Redis
+# Fly.io configuration for Docent Backend API
+# This runs PostgreSQL, Redis, Backend API, and Worker
 
-app = "docent-backend"
-primary_region = "ams"  # Amsterdam, Netherlands - change as needed
+app = "docent-api"
+primary_region = "ams"
 
 [build]
   dockerfile = "Dockerfile.backend.fly"
 
 [env]
   ENV_RESOLUTION_STRATEGY = "os_environ"
-  # Backend
   DOCENT_SERVER_PORT = "8888"
   # Database
   DOCENT_PG_HOST = "localhost"
@@ -19,12 +18,12 @@ primary_region = "ams"  # Amsterdam, Netherlands - change as needed
   # Redis
   DOCENT_REDIS_HOST = "localhost"
   DOCENT_REDIS_PORT = "6379"
-  # CORS - allow requests from frontend
-  DOCENT_CORS_ORIGINS = "https://docent-frontend.fly.dev"
+  # CORS - allow frontend domain
+  DOCENT_CORS_ORIGINS = "https://docent.fly.dev"
 
-# Main HTTP service (backend API)
+# HTTP service for the API
 [http_service]
-  internal_port = 8888  # Backend port
+  internal_port = 8888
   force_https = true
   auto_stop_machines = "off"
   auto_start_machines = true
@@ -36,49 +35,34 @@ primary_region = "ams"  # Amsterdam, Netherlands - change as needed
     hard_limit = 250
     soft_limit = 200
 
-  # Health check for the backend
+  # Health check for the API - uses root endpoint
   [[http_service.checks]]
-    grace_period = "120s"  # Increased for PostgreSQL initialization
+    grace_period = "120s"
     interval = "30s"
     method = "GET"
     timeout = "10s"
     path = "/"
 
-# VM configuration - adjust based on your needs
+# VM configuration
 [[vm]]
-  memory = "2gb"  # Increased for running multiple services
+  memory = "2gb"
   cpu_kind = "shared"
   cpus = 2
 
 # Persistent volume for PostgreSQL data
 [mounts]
-  source = "docent_backend_pgdata"
+  source = "docent_api_pgdata"
   destination = "/var/lib/postgresql/data"
   initial_size = "10gb"
 
 # Deployment configuration
 [deploy]
   strategy = "rolling"
-  # Run migrations before deployment
   release_command = "/app/scripts/pre-deploy.sh"
 
-# Process groups - all processes run in the same VM
+# Process groups
 [processes]
   app = "/app/scripts/start-backend.sh"
 
-# Secrets to set via `flyctl secrets set`:
-# Required:
-#   flyctl secrets set DOCENT_PG_PASSWORD=<strong-password> -a docent-backend
-#
-# Optional (for LLM providers):
-#   flyctl secrets set OPENAI_API_KEY=<your-key> -a docent-backend
-#   flyctl secrets set ANTHROPIC_API_KEY=<your-key> -a docent-backend
-#   flyctl secrets set GOOGLE_API_KEY=<your-key> -a docent-backend
-#
-# Optional (for monitoring):
-#   flyctl secrets set SENTRY_DSN=<your-dsn> -a docent-backend
-#   flyctl secrets set POSTHOG_API_KEY=<your-key> -a docent-backend
-#
-# Optional (deployment tracking):
-#   flyctl secrets set DEPLOYMENT_ID=production -a docent-backend
-
+# Secrets to set:
+# flyctl secrets set DOCENT_PG_PASSWORD=<strong-password> --app docent-api

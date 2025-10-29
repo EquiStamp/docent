@@ -1,5 +1,4 @@
-# Dockerfile for Fly.io Frontend deployment
-# This Dockerfile builds and runs only the Next.js frontend
+# Dockerfile for Docent Frontend with nginx basic auth
 
 FROM node:22-alpine AS frontend-deps
 RUN apk add --no-cache libc6-compat
@@ -11,14 +10,14 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 COPY --from=frontend-deps /app/node_modules ./node_modules
 COPY docent_core/_web ./
-# Build with backend URL - will be set by fly.toml env vars
-ARG NEXT_PUBLIC_API_HOST
-ARG NEXT_PUBLIC_INTERNAL_API_HOST
-ENV NEXT_PUBLIC_API_HOST=${NEXT_PUBLIC_API_HOST}
-ENV NEXT_PUBLIC_INTERNAL_API_HOST=${NEXT_PUBLIC_INTERNAL_API_HOST}
+
+# Build frontend with same-origin API (Next.js will proxy to backend)
+# This ensures cookies work properly for authentication
+ENV NEXT_PUBLIC_API_HOST=https://docent.fly.dev
+ENV NEXT_PUBLIC_INTERNAL_API_HOST=https://docent-api.fly.dev
 RUN npm run build
 
-# Runtime image
+# Runtime image with nginx
 FROM node:22-alpine
 
 ENV NODE_ENV=production
@@ -26,32 +25,101 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
 
-# Copy built frontend from builder stage
-COPY --from=frontend-builder /app/public /app/public
-COPY --from=frontend-builder /app/.next/standalone /app/
-COPY --from=frontend-builder /app/.next/static /app/.next/static
+# Install nginx and apache2-utils for htpasswd
+RUN apk add --no-cache nginx apache2-utils
+
+# Copy built frontend
+COPY --from=frontend-builder /app/public ./public
+COPY --from=frontend-builder /app/.next/standalone ./
+COPY --from=frontend-builder /app/.next/static ./.next/static
+
+# Create nginx configuration
+RUN mkdir -p /etc/nginx/http.d /run/nginx
+
+COPY <<'EOF' /etc/nginx/http.d/default.conf
+# Strip port from host header
+map $http_host $host_without_port {
+    "~^([^:]+):\d+$" $1;
+    default $http_host;
+}
+
+server {
+    listen 3000;
+    server_name _;
+    
+    # Health check endpoint - no auth required
+    location = /health {
+        auth_basic off;
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+    
+    # All routes require authentication
+    location / {
+        auth_basic "Docent Access";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host_without_port;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host_without_port;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOF
 
 # Create startup script
-RUN mkdir -p /app/scripts
-
 COPY <<'EOF' /app/scripts/start-frontend.sh
 #!/bin/sh
 set -e
 
-echo "Starting Docent frontend..."
+echo "Starting Docent Frontend..."
+
+# Setup basic auth if credentials are provided
+if [ -n "$AUTH_USERNAME" ] && [ -n "$AUTH_PASSWORD" ]; then
+    echo "Setting up basic authentication..."
+    echo "$AUTH_PASSWORD" | htpasswd -ci /etc/nginx/.htpasswd "$AUTH_USERNAME"
+    echo "Basic auth enabled for user: $AUTH_USERNAME"
+else
+    echo "WARNING: No AUTH_USERNAME/AUTH_PASSWORD set - nginx will be disabled!"
+    echo "To enable password protection, set: flyctl secrets set AUTH_USERNAME=admin AUTH_PASSWORD=yourpassword"
+fi
+
+# Start Frontend on port 3001
+echo "Starting Next.js server..."
 cd /app
-PORT=3000 HOSTNAME=0.0.0.0 node server.js
+PORT=3001 HOSTNAME=0.0.0.0 node server.js &
+FRONTEND_PID=$!
+
+# Start nginx if auth is configured
+if [ -f /etc/nginx/.htpasswd ]; then
+    echo "Starting nginx with basic auth..."
+    nginx -g 'daemon off;' &
+    NGINX_PID=$!
+    echo "Nginx started with password protection on port 3000"
+else
+    echo "Nginx not started - no auth configured."
+    echo "WARNING: Application is NOT password protected!"
+fi
+
+echo "Frontend started successfully!"
+
+# Wait for any process to exit
+wait -n
+
+# Exit with status of process that exited first
+exit $?
 EOF
 
-RUN chmod +x /app/scripts/*.sh
+RUN chmod +x /app/scripts/start-frontend.sh
 
-# Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
-
-# Default command
 CMD ["/app/scripts/start-frontend.sh"]
-

@@ -1,9 +1,5 @@
-# Dockerfile for Fly.io Backend deployment
-# This Dockerfile runs backend services only:
-# - PostgreSQL with pgvector
-# - Redis
-# - Backend API server
-# - Background worker
+# Dockerfile for Docent Backend API + PostgreSQL + Redis + Worker
+# This runs the backend services without the frontend
 
 FROM python:3.12-slim
 
@@ -14,11 +10,11 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    # Basic tools
     curl \
     gnupg \
     lsb-release \
     ca-certificates \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 # Add PostgreSQL repository and install PostgreSQL with pgvector
@@ -29,51 +25,44 @@ RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmo
         postgresql-15 \
         postgresql-contrib-15 \
         postgresql-15-pgvector \
-        redis-server \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Redis
+RUN apt-get update && apt-get install -y redis-server && rm -rf /var/lib/apt/lists/*
+
 # Install uv for Python package management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+RUN pip install --no-cache-dir uv
 
-#################################
-# Install Python dependencies   #
-#################################
-
-# Copy Python package files
+# Copy Python project files
 COPY docent docent
 COPY pyproject.toml .
 COPY uv.lock .
-
-# Convert uv.lock to requirements.txt and install
 RUN uv export --format requirements-txt > requirements.txt
 RUN uv pip install --system -r requirements.txt
 
-# Install the core application
+# Copy application code
 COPY docent_core docent_core
 RUN uv pip install --system -e .
 
-# Copy Alembic migrations
+# Copy database migrations and create empty .env
 COPY alembic alembic
 COPY alembic.ini alembic.ini
-
-#################################
-# Configuration & Scripts       #
-#################################
+RUN touch .env
 
 # Create necessary directories
-RUN mkdir -p /app/scripts /var/lib/postgresql/data
+RUN mkdir -p /app/scripts /var/log/supervisor /var/run/postgresql /var/lib/postgresql/data
 
-# Create startup scripts
+# Create startup script for backend services
 COPY <<'EOF' /app/scripts/start-backend.sh
 #!/bin/bash
 set -e
 
-echo "Starting Docent backend services..."
+echo "Starting Docent Backend Services..."
 
-# Use a subdirectory for PostgreSQL data (volume mount point may have lost+found)
+# Use a subdirectory for PostgreSQL data
 PGDATA="/var/lib/postgresql/data/pgdata"
 
-# Ensure proper ownership of the volume mount
+# Ensure proper ownership
 echo "Setting up PostgreSQL directory permissions..."
 chown -R postgres:postgres /var/lib/postgresql/data
 
@@ -85,7 +74,7 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
     chmod 700 "$PGDATA"
     su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D $PGDATA"
     
-    # Configure PostgreSQL to listen on localhost
+    # Configure PostgreSQL
     echo "host all all 127.0.0.1/32 md5" >> "$PGDATA/pg_hba.conf"
     echo "host all all ::1/128 md5" >> "$PGDATA/pg_hba.conf"
     echo "local all all md5" >> "$PGDATA/pg_hba.conf"
@@ -101,7 +90,7 @@ mkdir -p /var/lib/postgresql/logs
 chown postgres:postgres /var/lib/postgresql/logs
 su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D $PGDATA -l /var/lib/postgresql/logs/postgresql.log start"
 
-# Wait for PostgreSQL to be ready
+# Wait for PostgreSQL
 echo "Waiting for PostgreSQL to be ready..."
 for i in {1..30}; do
     if su - postgres -c "psql -U postgres -c 'SELECT 1' > /dev/null 2>&1"; then
@@ -112,7 +101,7 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Create database and user if they don't exist
+# Create database and user
 echo "Setting up database..."
 su - postgres -c "psql -U postgres -tc \"SELECT 1 FROM pg_user WHERE usename = '${DOCENT_PG_USER}'\" | grep -q 1 || psql -U postgres -c \"CREATE USER ${DOCENT_PG_USER} WITH PASSWORD '${DOCENT_PG_PASSWORD}';\""
 su - postgres -c "psql -U postgres -tc \"SELECT 1 FROM pg_database WHERE datname = '${DOCENT_PG_DATABASE}'\" | grep -q 1 || psql -U postgres -c \"CREATE DATABASE ${DOCENT_PG_DATABASE} OWNER ${DOCENT_PG_USER};\""
@@ -122,7 +111,7 @@ su - postgres -c "psql -U postgres -d ${DOCENT_PG_DATABASE} -c \"CREATE EXTENSIO
 echo "Starting Redis..."
 redis-server --daemonize yes --bind 127.0.0.1 --port 6379
 
-# Wait for Redis to be ready
+# Wait for Redis
 echo "Waiting for Redis to be ready..."
 for i in {1..10}; do
     if redis-cli ping > /dev/null 2>&1; then
@@ -148,7 +137,7 @@ echo "Starting Background Worker..."
 docent_core worker --workers 2 &
 WORKER_PID=$!
 
-echo "Backend services started successfully!"
+echo "All backend services started successfully!"
 
 # Wait for any process to exit
 wait -n
@@ -160,29 +149,13 @@ EOF
 COPY <<'EOF' /app/scripts/pre-deploy.sh
 #!/bin/bash
 set -e
-
-echo "Pre-deployment check..."
-echo "Skipping migrations - will run on startup"
-exit 0
+echo "Pre-deployment tasks completed"
 EOF
 
-# Make scripts executable
 RUN chmod +x /app/scripts/*.sh
 
-# Create a minimal .env file (actual values come from environment variables)
-RUN touch /app/.env
+# Expose API port
+EXPOSE 8888
 
-# Set proper permissions
-RUN chown -R postgres:postgres /var/lib/postgresql
-RUN chmod 700 /var/lib/postgresql/data || true
-
-# Expose ports (for documentation - Fly.io handles actual routing)
-EXPOSE 8888 5432 6379
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8888/ || exit 1
-
-# Default command
+# Start all services
 CMD ["/app/scripts/start-backend.sh"]
-
