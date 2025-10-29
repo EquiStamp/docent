@@ -146,10 +146,11 @@ server {
         proxy_set_header X-Forwarded-Port 443;
         proxy_cache_bypass $http_upgrade;
         
-        # Rewrite any redirects to remove port numbers and use https
-        proxy_redirect ~^http://localhost:3001(.*)$ https://$host_without_port$1;
-        proxy_redirect ~^http://([^:]+):\d+(.*)$ https://$1$2;
-        proxy_redirect ~^http://(.*)$ https://$1;
+        # Rewrite any redirects to use the correct host and protocol
+        proxy_redirect ~^https?://localhost:3001(.*)$ https://$host_without_port$1;
+        proxy_redirect ~^https?://127\.0\.0\.1:3001(.*)$ https://$host_without_port$1;
+        proxy_redirect ~^https?://([^:]+):\d+(.*)$ https://$1$2;
+        proxy_redirect ~^http://(.+)$ https://$1;
     }
 }
 EOF
@@ -252,7 +253,8 @@ WORKER_PID=$!
 # Start Frontend on port 3001 (nginx will proxy from 3000 -> 3001)
 echo "Starting Frontend..."
 cd /app/frontend
-PORT=3001 HOSTNAME=127.0.0.1 node server.js &
+# Set environment to trust proxy headers and generate correct URLs
+PORT=3001 HOSTNAME=127.0.0.1 NEXT_PUBLIC_API_HOST=https://docent.fly.dev node server.js &
 FRONTEND_PID=$!
 
 # Start nginx if auth is configured
