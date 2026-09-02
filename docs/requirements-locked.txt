@@ -615,7 +615,7 @@ pygments==2.19.2
     #   rich
 pyjwt==2.9.0
     # via redis
-pymdown-extensions==10.16
+pymdown-extensions==11.0.1
     # via
     #   mkdocs-material
     #   mkdocstrings
