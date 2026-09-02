@@ -613,7 +613,7 @@ pygments==2.19.2
     #   nbconvert
     #   pytest
     #   rich
-pyjwt==2.9.0
+pyjwt==2.13.0
     # via redis
 pymdown-extensions==10.16
     # via
