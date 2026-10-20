@@ -342,7 +342,7 @@ kiwisolver==1.4.8
     # via matplotlib
 linkify-it-py==2.0.3
     # via markdown-it-py
-mako==1.3.10
+mako==1.4.2
     # via alembic
 markdown==3.8.2
     # via
