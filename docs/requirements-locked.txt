@@ -411,7 +411,7 @@ multiprocess==0.70.16
     # via datasets
 nbclient==0.10.2
     # via nbconvert
-nbconvert==7.16.6
+nbconvert==7.17.2
     # via
     #   jupyter
     #   jupyter-server
