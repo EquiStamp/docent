@@ -444,7 +444,7 @@ numpy==2.3.1
     #   pgvector
 openai==1.93.0
     # via docent-core
-opentelemetry-api==1.34.1
+opentelemetry-api==1.45.1
     # via
     #   docent-core
     #   docent-python
