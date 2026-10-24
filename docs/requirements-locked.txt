@@ -737,7 +737,7 @@ send2trash==1.8.3
     # via jupyter-server
 sentry-sdk==2.32.0
     # via docent-core
-setuptools==80.9.0
+setuptools==84.1.0
     # via jupyterlab
 shellingham==1.5.4
     # via typer
