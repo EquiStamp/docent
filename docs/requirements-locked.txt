@@ -158,7 +158,7 @@ fastapi==0.115.14
     # via docent-core
 fastjsonschema==2.21.1
     # via nbformat
-filelock==3.18.0
+filelock==4.2.1
     # via
     #   datasets
     #   huggingface-hub
